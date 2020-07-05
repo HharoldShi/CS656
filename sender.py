@@ -4,25 +4,39 @@ from packet import *
 import threading
 import sys
 
+mutex = threading.Lock()
 
-# class Timer(object):
-#     def __init__(self):
-#         self.start_time = None
-#
-#     def start(self):
-#         self.start_time = time.time()
-#
-#     def stop(self):
-#         self.start_time = None
-#
-#     def time_elapsed(self):
-#         if self.start_time is None:
-#             print(0)
-#             return 0
-#         else:
-#             print(time.time()*1000 - self.start_time*1000)
-#             # print(self.start_time)
-#             return time.time()*1000 - self.start_time*1000 # in milliseconds
+class Timer(object):
+    def __init__(self):
+        self.start_time = None
+
+    def start(self):
+        mutex.acquire()
+        try:
+            self.start_time = time.time()
+        finally:
+            mutex.release()
+
+    def stop(self):
+        mutex.acquire()
+        try:
+            self.start_time = None
+        finally:
+            mutex.release()
+
+    def time_elapsed(self):
+        mutex.acquire()
+        try:
+            if self.start_time is None:
+                # print(0)
+                return 0
+            else:
+                print(time.time()*1000 - self.start_time*1000)
+                if not self.start_time:
+                    print('hello')
+                return time.time()*1000 - self.start_time*1000 # in milliseconds
+        finally:
+            mutex.release()
 
 
 
@@ -32,16 +46,15 @@ nextseqnum: int = 0
 n = 10  # window size
 sndpkt = {}  # dictionary of packet that has been sent
 timeout = 100  # ms
-# timer = Timer()
+timer = Timer()
 udpsocket = socket(AF_INET, SOCK_DGRAM)
-mutex = threading.Lock()
-restart_timer = False
+
 
 def udt_send(packet, emulatorIp, emulatorPort):
     udpsocket.sendto(packet.get_udp_data(), (emulatorIp, emulatorPort))
 
 
-def rdt_send(data, emulatorIp, emulatorPort, timer):
+def rdt_send(data, emulatorIp, emulatorPort):
     # create a packet of the data, append the packet into the sndpkt list
     # each packet is associate with a sequence number
     # send the packet through udt
@@ -53,7 +66,7 @@ def rdt_send(data, emulatorIp, emulatorPort, timer):
         timer.start()
 
 
-def rdt_rcv(senderPort, timer):
+def rdt_rcv(senderPort):
     print("rdt_rcv starts. ")
     udpsocket_rcv = socket(AF_INET, SOCK_DGRAM)
     udpsocket_rcv.bind(('', senderPort))
@@ -66,44 +79,26 @@ def rdt_rcv(senderPort, timer):
             acklog.write(str(rcv_packet.seq_num) + '\n')
             base = (rcv_packet.seq_num + 1) % 32
             if base == nextseqnum:
-                # timer.stop()
-                timer.cancel()
+                timer.stop()
             else:
-                timer.cancel()
                 timer.start()
         elif rcv_packet.type == 2:
             break
     acklog.close()
-    # exit(0)
 
 
-# def check_timeout(stop_event, emulatorIp, emulatorPort):
-#     print("check_timeout stars")
-#     while not stop_event.is_set():
-#         if timer.start_time is None:
-#             continue
-#         elif timer.time_elapsed() >= timeout:
-#             timer.start()
-#             i = base
-#             while base <= i < nextseqnum:
-#                 udt_send(sndpkt[i],emulatorIp, emulatorPort)
-#                 i += 1
-
-
-# def check_timeout(stop_event, emulatorIp, emulatorPort):
-#     while not stop_event.is_set():
-#         while restart_timer:
-#             time.sleep(0.1)
-#             i = base
-#             while base <= i < nextseqnum:
-#                 udt_send(sndpkt[i],emulatorIp, emulatorPort)
-#                 i += 1
-
-def timeout_event(emulatorIp, emulatorPort):
-    i = base
-    while base <= i < nextseqnum:
-        udt_send(sndpkt[i],emulatorIp, emulatorPort)
-        i += 1
+def check_timeout(stop_event, emulatorIp, emulatorPort):
+    print("check_timeout stars")
+    while not stop_event.is_set():
+        if timer.start_time is None:
+            continue
+        elif timer.time_elapsed() >= timeout:
+            # if timeout, restart timer and send al unacked packets
+            timer.start()
+            i = base
+            while base <= i < nextseqnum:
+                udt_send(sndpkt[i],emulatorIp, emulatorPort)
+                i += 1
 
 
 def main():
@@ -112,13 +107,11 @@ def main():
     senderPort = int(sys.argv[3])
     file = sys.argv[4]
 
-    timer = threading.Timer(timeout, timeout_event, args=(emulatorIp, emulatorPort))
-
-    # stop_event = threading.Event()
-    t1 = threading.Thread(target=rdt_rcv, args=(senderPort,timer))
-    # t2 = threading.Thread(target=check_timeout, args=(stop_event,emulatorIp, emulatorPort))
+    stop_event = threading.Event() # the stop event is used to kill the check_timeout thread.
+    t1 = threading.Thread(target=rdt_rcv, args=(senderPort,))
+    t2 = threading.Thread(target=check_timeout, args=(stop_event,emulatorIp, emulatorPort))
     t1.start()
-    # t2.start()
+    t2.start()
 
     # read data from file
     seqlog = open("seqnum.log", "w")
@@ -135,7 +128,7 @@ def main():
             while True:
                 global nextseqnum
                 if nextseqnum < base + n:
-                    rdt_send(piece, emulatorIp, emulatorPort, timer)
+                    rdt_send(piece, emulatorIp, emulatorPort)
                     print("send data packet" + str(nextseqnum))
                     seqlog.write(str(nextseqnum) + "\n")
                     nextseqnum += 1
@@ -147,9 +140,9 @@ def main():
     print("sender sends eot")
     t1.join()
     print("rdt_rcv stops")
-    # stop_event.set()
-    # t2.join()
-    # print("check_timeout stops")
+    stop_event.set()
+    t2.join()
+    print("check_timeout stops")
     exit(0)
 
 
