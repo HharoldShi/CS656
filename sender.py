@@ -60,7 +60,8 @@ timer = Timer()
 udpsocket = socket(AF_INET, SOCK_DGRAM)
 num_sent_packets = -1
 num_ack_packets = 0
-send_eot_flag = False
+send_eot_flag = 0
+seqlog = open("seqnum.log", "w")
 
 
 def udt_send(packet, emulatorIp, emulatorPort):
@@ -86,27 +87,43 @@ def rdt_send(data, emulatorIp, emulatorPort):
 
 def rdt_rcv(senderPort):
     print("rdt_rcv starts. ")
+
+    global base, num_sent_packets, send_eot_flag, num_ack_packets, nextseqnum
     udpsocket_rcv = socket(AF_INET, SOCK_DGRAM)
     udpsocket_rcv.bind(('', senderPort))
     acklog = open("ack.log", "w")
-    global send_eot_flag
-    global num_ack_packets
-    global num_sent_packets
+
     while True:
-        if (num_ack_packets == num_sent_packets):
-            send_eot_flag = True
+        if num_ack_packets == num_sent_packets:
+            send_eot_flag = 1
+
         rcvdata, emulator_adress = udpsocket_rcv.recvfrom(1024)
         rcv_packet = packet.parse_udp_data(rcvdata)
-        global base
-        if rcv_packet.type == 0 and rcv_packet.seq_num >= base:
-            acklog.write(str(rcv_packet.seq_num) + '\n')
-            base = (rcv_packet.seq_num + 1) % 32
-            num_ack_packets += 1
+        rcv_seq_num = rcv_packet.seq_num
+
+        if rcv_packet.type == 0:
+            if base < nextseqnum and base <= rcv_seq_num < nextseqnum:
+                num_ack_packets = num_ack_packets + (rcv_seq_num - base + 1)
+                base = (rcv_seq_num + 1) % 32
+                # print("1base = " + str(base) + ", num_ack_packets = " + str(num_ack_packets) + "rcv_seq_num = " + str(rcv_seq_num) + '\n')
+
+            elif base > nextseqnum and rcv_seq_num < nextseqnum:
+                num_ack_packets = num_ack_packets + (rcv_seq_num + 32 - base + 1)
+                base = (rcv_seq_num + 1) % 32
+                # print("2base = " + str(base) + ", num_ack_packets = " + str(num_ack_packets) + "rcv_seq_num = " + str(rcv_seq_num) + '\n')
+
+            elif base > nextseqnum and rcv_seq_num >= base:
+                num_ack_packets = num_ack_packets + (rcv_seq_num - base + 1)
+                base = (rcv_seq_num + 1) % 32
+                # print("3base = " + str(base) + ", num_ack_packets = " + str(num_ack_packets) + "rcv_seq_num = " + str(rcv_seq_num)+'\n')
+
+            acklog.write(str(rcv_seq_num) + '\n')
+
             if base == nextseqnum:
-                print("receive acks" + str(rcv_packet.seq_num) + ", no more sent packets, stop timer.\n")
+                print("receive acks" + str(rcv_seq_num) + ", no more sent packets, stop timer.\n")
                 timer.stop()
             else:
-                print("receive acks" + str(rcv_packet.seq_num) + ", restart timer.\n")
+                print("receive acks" + str(rcv_seq_num) + ", restart timer.\n")
                 timer.start()
         elif rcv_packet.type == 2:
             break
@@ -115,6 +132,7 @@ def rdt_rcv(senderPort):
 
 def check_timeout(stop_event, emulatorIp, emulatorPort):
     print("check_timeout starts")
+    global base, nextseqnum
     while not stop_event.is_set():
         # if timeout, restart timer and send all unacked packets
         if timer.time_elapsed() >= timeout:
@@ -124,8 +142,11 @@ def check_timeout(stop_event, emulatorIp, emulatorPort):
             # set mutex for sndpkt
             mutex.acquire()
             try:
-                while base <= i < nextseqnum:
-                    udt_send(sndpkt[i],emulatorIp, emulatorPort)
+                while (base < nextseqnum and base <= i < nextseqnum) or (nextseqnum < base <= i < nextseqnum + 32):
+                    k = i % 32
+                    udt_send(sndpkt[k],emulatorIp, emulatorPort)
+                    seqlog.write(str(k) + "\n")
+                    print("send data packet" + str(k) + '\n')
                     i += 1
             finally:
                 mutex.release()
@@ -148,7 +169,7 @@ def main():
 
     # read data from file
     transmission_start_time = time.monotonic()
-    seqlog = open("seqnum.log", "w")
+
     with open(file, "r") as f:
         # read data until EOF
         while True:
@@ -161,21 +182,27 @@ def main():
             # send data only when the window is not full
             while True:
                 global nextseqnum
-                if nextseqnum < base + n:
+                if (base <= nextseqnum < base + n) or (nextseqnum < base and nextseqnum + 32 < base + n):
                     rdt_send(piece, emulatorIp, emulatorPort)
                     sent_packets_count += 1
-                    seqlog.write(str(nextseqnum) + "\n")
-                    nextseqnum += 1
-                    nextseqnum = nextseqnum % 32
-                    break
-    seqlog.close()
+                    mutex.acquire()
+                    try:
+                        seqlog.write(str(nextseqnum) + "\n")
 
-    global num_sent_packets
+                        nextseqnum += 1
+                        nextseqnum = nextseqnum % 32
+                    finally:
+                        mutex.release()
+                    break
+
+
+    global num_sent_packets, num_ack_packets
     num_sent_packets = sent_packets_count
 
     # send EOT to receiver
     while True:
-        if send_eot_flag:
+        print("num_ack_packets = " + str(num_ack_packets) + ", num_sent_packets = " + str(num_sent_packets) + '\n')
+        if send_eot_flag == 1:
             udt_send(packet.create_eot(nextseqnum), emulatorIp, emulatorPort)
             print("sender sends eot")
             break
@@ -184,6 +211,8 @@ def main():
     stop_event.set()
     t2.join()
     print("check_timeout stops")
+
+    seqlog.close()
 
     transmission_end_time = time.monotonic()
     transmission_time = transmission_end_time - transmission_start_time
