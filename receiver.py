@@ -2,6 +2,13 @@ import sys
 from packet import *
 from socket import *
 
+DEBUG = True
+
+
+def log(s):
+    if DEBUG:
+        print(s)
+
 
 def main():
     emulatorIp = sys.argv[1]
@@ -32,14 +39,14 @@ def main():
             sndsocket.sendto(ackpkt.get_udp_data(), (emulatorIp, emulatorPort))
             f.write(rcvpacket.data)
             arrivelog.write(str(expseqnum) + '\n')
-            print("send ack" + str(expseqnum))
+            log("send ack" + str(expseqnum))
             expseqnum += 1
             expseqnum = expseqnum % 32
 
         elif rcvpacket.type == 2:
             eot_pkt = packet.create_eot(expseqnum)
             sndsocket.sendto(eot_pkt.get_udp_data(), (emulatorIp, emulatorPort))
-            print("Receive eot and send eot. ")
+            log("Receive eot and send eot. ")
             break
     f.close()
     arrivelog.close()

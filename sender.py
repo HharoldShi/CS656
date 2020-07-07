@@ -6,6 +6,7 @@ import sys
 
 mutex = threading.Lock()
 
+
 class Timer(object):
     def __init__(self):
         self.start_time = None
@@ -27,28 +28,13 @@ class Timer(object):
     def time_elapsed(self):
         mutex.acquire()
         try:
-            if self.start_time is None:
+            if self.start_time is None: # when a timer stops, the time_elapsed is set to 0.
                 return 0
             else:
                 # print(time.monotonic()*1000 - self.start_time*1000)
-                return time.monotonic()*1000 - self.start_time*1000 # in milliseconds
+                return time.monotonic()*1000 - self.start_time*1000 # *1000 to convert time to milliseconds
         finally:
             mutex.release()
-
-    # def time_elapsed(self):
-    #     mutex.acquire()
-    #     try:
-    #         if self.start_time is None:
-    #             return 0
-    #         else:
-    #             # print(time.monotonic()*1000 - self.start_time*1000)
-    #             if not self.start_time:
-    #                 print('start_time is none. ')
-    #             return time.monotonic()*1000 - self.start_time*1000 # in milliseconds
-    #     finally:
-    #         mutex.release()
-
-
 
 
 base = 0
@@ -62,6 +48,12 @@ num_sent_packets = -1
 num_ack_packets = 0
 send_eot_flag = 0
 seqlog = open("seqnum.log", "w")
+DEBUG = True
+
+
+def log(s):
+    if DEBUG:
+        print(s)
 
 
 def udt_send(packet, emulatorIp, emulatorPort):
@@ -79,14 +71,14 @@ def rdt_send(data, emulatorIp, emulatorPort):
         udt_send(sndpkt[nextseqnum], emulatorIp, emulatorPort)
     finally:
         mutex.release()
-    print("send data packet" + str(nextseqnum))
+    log("send data packet" + str(nextseqnum))
     if base == nextseqnum:
-        print("base == nextseqnum, restart timer")
+        log("base == nextseqnum, restart timer")
         timer.start()
 
 
 def rdt_rcv(senderPort):
-    print("rdt_rcv starts. ")
+    log("rdt_rcv starts. ")
 
     global base, num_sent_packets, send_eot_flag, num_ack_packets, nextseqnum
     udpsocket_rcv = socket(AF_INET, SOCK_DGRAM)
@@ -105,25 +97,25 @@ def rdt_rcv(senderPort):
             if base < nextseqnum and base <= rcv_seq_num < nextseqnum:
                 num_ack_packets = num_ack_packets + (rcv_seq_num - base + 1)
                 base = (rcv_seq_num + 1) % 32
-                # print("1base = " + str(base) + ", num_ack_packets = " + str(num_ack_packets) + "rcv_seq_num = " + str(rcv_seq_num) + '\n')
+                # log("1base = " + str(base) + ", num_ack_packets = " + str(num_ack_packets) + "rcv_seq_num = " + str(rcv_seq_num) + '\n')
 
             elif base > nextseqnum and rcv_seq_num < nextseqnum:
                 num_ack_packets = num_ack_packets + (rcv_seq_num + 32 - base + 1)
                 base = (rcv_seq_num + 1) % 32
-                # print("2base = " + str(base) + ", num_ack_packets = " + str(num_ack_packets) + "rcv_seq_num = " + str(rcv_seq_num) + '\n')
+                # log("2base = " + str(base) + ", num_ack_packets = " + str(num_ack_packets) + "rcv_seq_num = " + str(rcv_seq_num) + '\n')
 
             elif base > nextseqnum and rcv_seq_num >= base:
                 num_ack_packets = num_ack_packets + (rcv_seq_num - base + 1)
                 base = (rcv_seq_num + 1) % 32
-                # print("3base = " + str(base) + ", num_ack_packets = " + str(num_ack_packets) + "rcv_seq_num = " + str(rcv_seq_num)+'\n')
+                # log("3base = " + str(base) + ", num_ack_packets = " + str(num_ack_packets) + "rcv_seq_num = " + str(rcv_seq_num)+'\n')
 
             acklog.write(str(rcv_seq_num) + '\n')
 
             if base == nextseqnum:
-                print("receive acks" + str(rcv_seq_num) + ", no more sent packets, stop timer.\n")
+                log("receive acks" + str(rcv_seq_num) + ", no more sent packets, stop timer.\n")
                 timer.stop()
             else:
-                print("receive acks" + str(rcv_seq_num) + ", restart timer.\n")
+                log("receive acks" + str(rcv_seq_num) + ", restart timer.\n")
                 timer.start()
         elif rcv_packet.type == 2:
             break
@@ -131,12 +123,12 @@ def rdt_rcv(senderPort):
 
 
 def check_timeout(stop_event, emulatorIp, emulatorPort):
-    print("check_timeout starts")
+    log("check_timeout starts")
     global base, nextseqnum
     while not stop_event.is_set():
         # if timeout, restart timer and send all unacked packets
         if timer.time_elapsed() >= timeout:
-            print("timeout, restart timer. ")
+            log("timeout, restart timer. ")
             timer.start()
             i = base
             # set mutex for sndpkt
@@ -146,11 +138,11 @@ def check_timeout(stop_event, emulatorIp, emulatorPort):
                     k = i % 32
                     udt_send(sndpkt[k],emulatorIp, emulatorPort)
                     seqlog.write(str(k) + "\n")
-                    print("send data packet" + str(k) + '\n')
+                    log("send data packet" + str(k) + '\n')
                     i += 1
             finally:
                 mutex.release()
-            print("resend unacked packets. ")
+            log("resend unacked packets. ")
 
 
 def main():
@@ -201,16 +193,16 @@ def main():
 
     # send EOT to receiver
     while True:
-        print("num_ack_packets = " + str(num_ack_packets) + ", num_sent_packets = " + str(num_sent_packets) + '\n')
+        log("num_ack_packets = " + str(num_ack_packets) + ", num_sent_packets = " + str(num_sent_packets) + '\n')
         if send_eot_flag == 1:
             udt_send(packet.create_eot(nextseqnum), emulatorIp, emulatorPort)
-            print("sender sends eot")
+            log("sender sends eot")
             break
     t1.join()
-    print("rdt_rcv stops")
+    log("rdt_rcv stops")
     stop_event.set()
     t2.join()
-    print("check_timeout stops")
+    log("check_timeout stops")
 
     seqlog.close()
 
@@ -218,7 +210,7 @@ def main():
     transmission_time = transmission_end_time - transmission_start_time
     with open ("time.log", "w") as timelog:
         timelog.write(str(transmission_time) + '\n')
-    print("transmission time is " + str(transmission_time) + "s")
+    log("transmission time is " + str(transmission_time) + "s")
     exit(0)
 
 
