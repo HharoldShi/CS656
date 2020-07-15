@@ -18,6 +18,7 @@ def main():
 
     expseqnum = 0
     ackpkt = packet.create_ack(0)
+    is_first_packet_lost = True
 
     rcvsocket = socket(AF_INET, SOCK_DGRAM)
     rcvsocket.bind(('', receiverPort))
@@ -31,10 +32,12 @@ def main():
         rcvpacket = packet.parse_udp_data(rcvdata)
 
         if rcvpacket.type == 1 and rcvpacket.seq_num != expseqnum:
-            sndsocket.sendto(ackpkt.get_udp_data(), (emulatorIp, emulatorPort))
+            if not is_first_packet_lost: # if the first packet is lost, do not send ack
+                sndsocket.sendto(ackpkt.get_udp_data(), (emulatorIp, emulatorPort))
             arrivelog.write(str(rcvpacket.seq_num) + '\n')
 
         elif rcvpacket.type == 1 and rcvpacket.seq_num == expseqnum:
+            is_first_packet_lost = False
             ackpkt = packet.create_ack(expseqnum)
             sndsocket.sendto(ackpkt.get_udp_data(), (emulatorIp, emulatorPort))
             f.write(rcvpacket.data)
@@ -48,7 +51,7 @@ def main():
             sndsocket.sendto(eot_pkt.get_udp_data(), (emulatorIp, emulatorPort))
             log("Receive eot and send eot. ")
             break
-            
+
     f.close()
     arrivelog.close()
     exit(0)
