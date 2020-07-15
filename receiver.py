@@ -2,7 +2,7 @@ import sys
 from packet import *
 from socket import *
 
-DEBUG = True
+DEBUG = False
 
 
 def log(s):
@@ -48,6 +48,7 @@ def main():
             sndsocket.sendto(eot_pkt.get_udp_data(), (emulatorIp, emulatorPort))
             log("Receive eot and send eot. ")
             break
+            
     f.close()
     arrivelog.close()
     exit(0)
