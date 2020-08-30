@@ -14,6 +14,3 @@ The programs are tested on ubuntu1804-002.student.cs.uwaterloo.ca, ubuntu1804-00
 and ubuntu1804-008.student.cs.uwaterloo.ca.
 
 Since programs are writeen in Python3, no make or compilers are used.
-
-
-nEmulator-linux386 9991 localhost 9994 9993 host3 9992 1 0.2 0

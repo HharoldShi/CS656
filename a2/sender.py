@@ -194,7 +194,7 @@ def main():
     # record transmission time
     transmission_end_time = time.monotonic()
     transmission_time = transmission_end_time - transmission_start_time
-    with open("time.log", "a") as timelog:
+    with open("time.log", "w") as timelog:
         timelog.write(str(transmission_time) + '\n')
     log("transmission time is " + str(transmission_time) + "s")
 
